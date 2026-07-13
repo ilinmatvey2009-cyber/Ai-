@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-подбор товара из базы поставщиков</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --bg:#0d1117; --panel:#161b22; --border:#2a3140;
+  --accent:#4f9dff; --accent2:#3ddc97; --text:#e6edf3; --dim:#8b949e;
+}
+body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; line-height:1.5; }
+.wrap { max-width:980px; margin:0 auto; padding:32px 20px 60px; }
+h1 { font-size:24px; margin-bottom:6px; }
+.sub { color:var(--dim); font-size:14px; margin-bottom:22px; }
+.badge-demo { display:inline-block; background:rgba(79,157,255,0.15); color:var(--accent); border:1px solid rgba(79,157,255,0.3); padding:3px 10px; border-radius:20px; font-size:12px; margin-left:8px; }
+
+.tabs { display:flex; gap:6px; margin-bottom:20px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.tab-btn { background:transparent; border:none; color:var(--dim); padding:10px 16px; font-size:14px; cursor:pointer; border-bottom:2px solid transparent; }
+.tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tab-content { display:none; }
+.tab-content.active { display:block; }
+
+.panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:22px; margin-bottom:20px; }
+label { display:block; font-size:13px; color:var(--dim); margin-bottom:8px; }
+textarea {
+  width:100%; min-height:80px; background:#0d1117; border:1px solid var(--border); border-radius:8px;
+  color:var(--text); padding:12px 14px; font-size:15px; resize:vertical; font-family:inherit;
+}
+textarea:focus { outline:none; border-color:var(--accent); }
+
+.examples { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.ex-btn { background:transparent; border:1px solid var(--border); color:var(--dim); padding:6px 12px; border-radius:20px; font-size:12px; cursor:pointer; transition:.2s; }
+.ex-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+.submit-btn { margin-top:16px; background:linear-gradient(135deg,var(--accent),#2f6fd6); color:#fff; border:none; padding:12px 28px; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; transition:.2s; }
+.submit-btn:hover { transform:translateY(-1px); box-shadow:0 8px 24px rgba(79,157,255,0.35); }
+
+.result { display:none; }
+.result.show { display:block; }
+.attrs { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 4px; }
+.attr-chip { background:#0d1117; border:1px solid var(--border); border-radius:8px; padding:8px 14px; font-size:13px; }
+.attr-chip b { color:var(--accent2); display:block; font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
+
+.match-line { margin:18px 0 10px; font-size:16px; }
+.match-line b { color:var(--accent2); }
+.confidence { color:var(--dim); font-size:13px; }
+
+table { width:100%; border-collapse:collapse; margin-top:10px; font-size:14px; }
+th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
+th { color:var(--dim); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+tr.best td { color:var(--accent2); font-weight:600; }
+.delta-pos { color:#ff9f6b; }
+.delta-zero { color:var(--accent2); }
+
+.empty-msg { color:var(--dim); font-size:14px; }
+.note { color:var(--dim); font-size:12px; margin-top:18px; border-top:1px solid var(--border); padding-top:14px; }
+
+pre.code-block { background:#0d1117; border:1px solid var(--border); border-radius:8px; padding:18px; font-size:12.5px; overflow-x:auto; white-space:pre; line-height:1.5; color:#c9d1d9; }
+.copy-btn { float:right; background:var(--panel); border:1px solid var(--border); color:var(--dim); padding:5px 12px; border-radius:6px; font-size:12px; cursor:pointer; margin-bottom:10px; }
+.copy-btn:hover { color:var(--accent); border-color:var(--accent); }
+
+.doc h3 { color:var(--accent2); font-size:15px; margin:20px 0 8px; }
+.doc h3:first-child { margin-top:0; }
+.doc p, .doc li { color:var(--text); font-size:14px; margin-bottom:6px; }
+.doc ul { margin-left:20px; margin-bottom:10px; }
+.arch-flow { background:#0d1117; border:1px solid var(--border); border-radius:8px; padding:16px; font-size:13px; color:var(--dim); margin:12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AI-подбор товара из базы поставщиков <span class="badge-demo">DEMO MODE</span></h1>
+  <p class="sub">Всё в одном файле: рабочее демо + backend-код (Python) + инструкция для продакшена.</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="demo">🖥 Демо</button>
+    <button class="tab-btn" data-tab="parser">🐍 AI-парсер (Python)</button>
+    <button class="tab-btn" data-tab="matcher">🐍 Матчер (Python)</button>
+    <button class="tab-btn" data-tab="docs">📄 Инструкция</button>
+  </div>
+
+  <!-- ===== DEMO TAB ===== -->
+  <div class="tab-content active" id="tab-demo">
+    <div class="panel">
+      <label>Текст заявки (как есть, с опечатками и жаргоном — это нормально)</label>
+      <textarea id="orderInput" placeholder="Например: труба нержа 20 полтора длина 3 метра надо 10 штук"></textarea>
+      <div class="examples">
+        <button class="ex-btn" data-q="трубы нержа 20 полтора длина 3 метра надо 10 штук">труба нержа 20 полтора</button>
+        <button class="ex-btn" data-q="кабель ввг 3 на 2.5 нужно 100 метров">кабель ввг 3 на 2.5</button>
+        <button class="ex-btn" data-q="шурik аккум 18 вольт">шурik аккум 18в</button>
+        <button class="ex-btn" data-q="лист нержа 2мм">лист нержа 2мм</button>
+      </div>
+      <button class="submit-btn" id="submitBtn">Обработать заявку →</button>
+    </div>
+
+    <div class="panel result" id="resultPanel">
+      <div class="attrs" id="attrsBox"></div>
+      <div class="match-line" id="matchLine"></div>
+      <table id="resultTable">
+        <thead><tr><th>Критерий</th><th>Поставщик</th><th>Цена</th><th>Срок, дн</th><th>Рейтинг</th><th>Δ к min</th></tr></thead>
+        <tbody id="resultBody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel" id="emptyPanel">
+      <p class="empty-msg">Результат появится здесь после обработки заявки.</p>
+    </div>
+
+    <p class="note">
+      ⚙️ Извлечение атрибутов сейчас — локальная JS-эвристика (имитация LLM), каталог — 12 демо-товаров.
+      Полный Python-код для продакшена — во вкладках выше.
+    </p>
+  </div>
+
+  <!-- ===== PARSER TAB ===== -->
+  <div class="tab-content" id="tab-parser">
+    <div class="panel">
+      <button class="copy-btn" onclick="copyCode('code-parser')">📋 Скопировать</button>
+      <pre class="code-block" id="code-parser">&quot;&quot;&quot;
+AI-парсер заявки: превращает произвольный текст (&quot;труба нержа 20 полтора 3 метра&quot;)
+в структурированные атрибуты товара.
+
+В ПРОДАКШЕНЕ: реальный вызов LLM (пример — Claude API).
+Стоимость: Claude Haiku ~ $0.001-0.003 за заявку, задержка ~0.5-1 сек.
+&quot;&quot;&quot;
+import os, json, re
+
+DEMO_MODE = True  # False -&gt; реальный вызов API (нужен ANTHROPIC_API_KEY + доступ в сеть)
+
+EXTRACTION_PROMPT = &quot;&quot;&quot;Ты — парсер заявок для отдела снабжения.
+Извлеки из текста заявки клиента структурированные данные в JSON:
+{
+  &quot;product_type&quot;: &quot;базовый тип товара (труба/кабель/профиль/крепёж/инструмент/...)&quot;,
+  &quot;material&quot;: &quot;материал, если указан (нержавеющая сталь/оцинкованный/ПВХ/алюминий/...) или null&quot;,
+  &quot;dimensions&quot;: &quot;размеры в формате AxB или одно число, если указаны, иначе null&quot;,
+  &quot;quantity&quot;: число или null,
+  &quot;unit&quot;: &quot;единица измерения (м/шт/кг/т/м2/меш) или null&quot;,
+  &quot;raw_normalized&quot;: &quot;нормализованное короткое название товара для поиска&quot;
+}
+Текст заявки: &quot;{text}&quot;
+Верни только JSON, без пояснений.&quot;&quot;&quot;
+
+def ai_extract(raw_text: str) -&gt; dict:
+    if DEMO_MODE:
+        return _mock_llm_extract(raw_text)
+    else:
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.environ[&quot;ANTHROPIC_API_KEY&quot;])
+        resp = client.messages.create(
+            model=&quot;claude-haiku-4-5&quot;,
+            max_tokens=300,
+            messages=[{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: EXTRACTION_PROMPT.format(text=raw_text)}]
+        )
+        return json.loads(resp.content[0].text)
+
+def _mock_llm_extract(raw_text: str) -&gt; dict:
+    &quot;&quot;&quot;Заглушка для офлайн-демонстрации логики (в проде заменяется реальным вызовом LLM).&quot;&quot;&quot;
+    t = raw_text.lower()
+    material = None
+    for kw, norm in [(&quot;нерж&quot;, &quot;нержавеющая сталь&quot;), (&quot;оцинк&quot;, &quot;оцинкованный&quot;),
+                     (&quot;пвх&quot;, &quot;ПВХ&quot;), (&quot;алюмин&quot;, &quot;алюминий&quot;), (&quot;медн&quot;, &quot;медь&quot;)]:
+        if kw in t:
+            material = norm
+            break
+    product_type = None
+    for kw in [&quot;труба&quot;, &quot;кабель&quot;, &quot;провод&quot;, &quot;профиль&quot;, &quot;лист&quot;, &quot;арматура&quot;,
+               &quot;уголок&quot;, &quot;швеллер&quot;, &quot;саморез&quot;, &quot;болт&quot;, &quot;дюбель&quot;, &quot;гайка&quot;,
+               &quot;перфоратор&quot;, &quot;болгарк&quot;, &quot;шурупов&quot;, &quot;шурik&quot;, &quot;шурик&quot;, &quot;уровень&quot;]:
+        if kw in t:
+            product_type = kw
+            break
+    dims = re.findall(r&quot;\d+[.,]?\d*\s*(?:х|x|на)\s*\d+[.,]?\d*&quot;, t)
+    dimensions = dims[0].replace(&quot; &quot;, &quot;&quot;).replace(&quot;,&quot;, &quot;.&quot;) if dims else None
+    if not dimensions and &quot;полтора&quot; in t:
+        nums = re.findall(r&quot;\d+&quot;, t)
+        if nums:
+            dimensions = f&quot;{nums[0]}x1.5&quot;
+    qty_match = re.search(r&quot;(\d+)\s*(шт|метр|м\b|кг|т\b)&quot;, t)
+    quantity = int(qty_match.group(1)) if qty_match else None
+    unit = qty_match.group(2) if qty_match else None
+    unit = {&quot;метр&quot;: &quot;м&quot;}.get(unit, unit)
+
+    return {
+        &quot;product_type&quot;: product_type, &quot;material&quot;: material, &quot;dimensions&quot;: dimensions,
+        &quot;quantity&quot;: quantity, &quot;unit&quot;: unit, &quot;raw_normalized&quot;: raw_text
+    }
+</pre>
+    </div>
+  </div>
+
+  <!-- ===== MATCHER TAB ===== -->
+  <div class="tab-content" id="tab-matcher">
+    <div class="panel">
+      <button class="copy-btn" onclick="copyCode('code-matcher')">📋 Скопировать</button>
+      <pre class="code-block" id="code-matcher">&quot;&quot;&quot;
+Матчер заявок к базе прайсов поставщиков.
+Масштабирование на 200 000 SKU: обратный индекс по токенам строится один раз при
+загрузке базы; в проде — PostgreSQL + pg_trgm или Elasticsearch/OpenSearch/Meilisearch.
+&quot;&quot;&quot;
+import re
+from difflib import SequenceMatcher
+
+SYNONYMS = {&quot;нерж&quot;: &quot;нержавеющая&quot;, &quot;нержавейка&quot;: &quot;нержавеющая&quot;,
+            &quot;проф&quot;: &quot;профильная&quot;, &quot;оцинковка&quot;: &quot;оцинкованный&quot;}
+
+def normalize(text: str):
+    t = text.lower().replace(&quot;х&quot;, &quot;x&quot;)
+    for k, v in SYNONYMS.items():
+        t = t.replace(k, v)
+    t = re.sub(r&quot;[^\w\.]+&quot;, &quot; &quot;, t)
+    return [tok for tok in t.split() if tok]
+
+def build_index(products: list):
+    index, norm_cache = {}, []
+    for i, name in enumerate(products):
+        toks = normalize(name)
+        norm_cache.append(toks)
+        for t in toks:
+            index.setdefault(t, set()).add(i)
+    return index, norm_cache
+
+def match_query(query, products, index, norm_cache, ai_attrs=None, catalog_attrs=None, top_n=8):
+    q_tokens = normalize(query)
+    scores = {}
+    for t in q_tokens:
+        for pid in index.get(t, []):
+            scores[pid] = scores.get(pid, 0) + 1
+    candidates = sorted(scores, key=scores.get, reverse=True)[:top_n] if scores else range(len(products))
+    best_pid, best_score = None, -1
+    q_str = &quot; &quot;.join(q_tokens)
+    for pid in candidates:
+        p_str = &quot; &quot;.join(norm_cache[pid])
+        ratio = SequenceMatcher(None, q_str, p_str).ratio()
+        overlap = scores.get(pid, 0)
+        bonus = 0
+        if ai_attrs and catalog_attrs:
+            if ai_attrs.get(&quot;dimensions&quot;) and catalog_attrs[pid].get(&quot;dimensions&quot;) == ai_attrs[&quot;dimensions&quot;]:
+                bonus += 0.5
+            if ai_attrs.get(&quot;material&quot;) and catalog_attrs[pid].get(&quot;material&quot;) == ai_attrs[&quot;material&quot;]:
+                bonus += 0.3
+        final = ratio * 0.5 + (overlap / max(len(q_tokens), 1)) * 0.1 + bonus
+        if final &gt; best_score:
+            best_score, best_pid = final, pid
+    return best_pid, round(best_score, 3)
+
+def top3_suppliers(rows_for_product):
+    rows = sorted(rows_for_product, key=lambda r: r[1])
+    prices = [r[1] for r in rows]
+    min_price, avg_price = min(prices), sum(prices) / len(prices)
+    cheapest = rows[0]
+    def balance(r):
+        price, delivery, rating = r[1], r[2], r[3]
+        return (price / avg_price) * 0.5 + (delivery / 14) * 0.25 - (rating / 5) * 0.25
+    optimal = min(rows, key=balance)
+    remaining = [r for r in rows if r is not cheapest and r is not optimal]
+    fastest = min(remaining, key=lambda r: r[2]) if remaining else rows[-1]
+    result = []
+    for label, r in [(&quot;Самый дешёвый&quot;, cheapest), (&quot;Оптимальный&quot;, optimal), (&quot;Самый быстрый&quot;, fastest)]:
+        supplier, price, delivery, rating = r
+        delta = round((price - min_price) / min_price * 100, 1)
+        result.append({&quot;criterion&quot;: label, &quot;supplier&quot;: supplier, &quot;price&quot;: price,
+                        &quot;delivery_days&quot;: delivery, &quot;rating&quot;: rating, &quot;delta_vs_min_pct&quot;: delta})
+    return result, round(avg_price, 2), min_price
+</pre>
+    </div>
+  </div>
+
+  <!-- ===== DOCS TAB ===== -->
+  <div class="tab-content" id="tab-docs">
+    <div class="panel doc">
+      <h3>Быстрый старт</h3>
+      <p>Вкладка «Демо» работает прямо в этом файле — открывать отдельно ничего не нужно.</p>
+      <p>Код из вкладок «AI-парсер» и «Матчер» — готовые Python-модули для вашего backend (кнопка «Скопировать» → вставить в .py файл).</p>
+
+      <h3>Что сейчас демо, а что заменить для продакшена</h3>
+      <ul>
+        <li><b>AI-извлечение атрибутов</b> — сейчас эвристика (regex+словарь). В проде: реальный вызов Claude/GPT API — в коде парсера уже есть флаг <code>DEMO_MODE</code> и готовая функция под ключ <code>ANTHROPIC_API_KEY</code>. Важно: вызов LLM должен идти с backend, не из браузера — ключ API нельзя хранить в JS на клиенте.</li>
+        <li><b>База товаров</b> — сейчас 12 демо-позиций в JS-массиве. Для 200 000 SKU нужна БД: PostgreSQL + расширение pg_trgm (триграммный индекс) выдержит нечёткий поиск за миллисекунды, либо Elasticsearch/OpenSearch/Meilisearch.</li>
+        <li><b>Реальные прайсы поставщиков</b> — пришлите Excel/CSV по каждому поставщику, движок матчера сведёт их в единую таблицу (sku_id, товар, категория, ед.изм, поставщик, цена, срок, рейтинг).</li>
+        <li><b>OCR рукописных заявок</b> — отдельный шаг перед AI-парсером: фото → текст (Yandex Vision OCR / Google Cloud Vision). Не входит в этот файл, требует отдельной интеграции.</li>
+      </ul>
+
+      <h3>Архитектура полной системы</h3>
+      <div class="arch-flow">
+Фото рукописи → OCR → текст заявки<br>
+&nbsp;&nbsp;&nbsp;&nbsp;→ AI-парсер (LLM) → атрибуты (товар, материал, размер, кол-во)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;→ Матчинг-движок (индекс + fuzzy + фильтр по атрибутам) → найденный SKU<br>
+&nbsp;&nbsp;&nbsp;&nbsp;→ Топ-3 поставщика (дешёвый / оптимальный / быстрый) с аналитикой цены<br>
+&nbsp;&nbsp;&nbsp;&nbsp;→ Таблица менеджеру / клиенту
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- TABS ----------
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+function copyCode(id) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    const original = btn.textContent;
+    btn.textContent = '✅ Скопировано';
+    setTimeout(() => btn.textContent = original, 1500);
+  });
+}
+
+// ---------- Демо-каталог ----------
+const PRODUCTS = [
+  { name:"Труба нержавеющая 20х1.5", unit:"м" },
+  { name:"Труба нержавеющая 25х2.0", unit:"м" },
+  { name:"Труба стальная профильная 40х40х2", unit:"м" },
+  { name:"Труба ПВХ канализационная 110мм", unit:"м" },
+  { name:"Кабель ВВГнг 3х2.5", unit:"м" },
+  { name:"Кабель ВВГнг 3х1.5", unit:"м" },
+  { name:"Кабель NYM 5х4", unit:"м" },
+  { name:"Провод ПУГВ 1х4", unit:"м" },
+  { name:"Лист нержавеющий AISI304 2мм", unit:"м2" },
+  { name:"Шуруповёрт аккумуляторный 18В", unit:"шт" },
+  { name:"Болгарка 125мм 900Вт", unit:"шт" },
+  { name:"Перфоратор SDS-Plus 800Вт", unit:"шт" },
+];
+const SUPPLIERS = ["МеталлТорг","СтройКомплект","ПромСнаб","ТехноРесурс","ГлобалМет","УралМеталл"];
+
+let seed = 42;
+function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+function rndRange(a,b){ return a + rnd()*(b-a); }
+
+const SKU = [];
+PRODUCTS.forEach((p, idx) => {
+  const base = rndRange(50, 5000);
+  const n = Math.floor(rndRange(4,7));
+  const shuffled = [...SUPPLIERS].sort(()=>rnd()-0.5).slice(0, n);
+  shuffled.forEach(sup => {
+    SKU.push({
+      productIdx: idx, supplier: sup,
+      price: Math.round(base * rndRange(0.85,1.25) * 100)/100,
+      delivery: Math.floor(rndRange(1,14)),
+      rating: Math.round(rndRange(3.6,5.0)*10)/10
+    });
+  });
+});
+
+function normalize(text){
+  let t = text.toLowerCase().replace(/х/g,'x').replace(/×/g,'x');
+  t = t.replace(/[^\wа-яё.]+/gi, ' ');
+  return t.split(' ').filter(Boolean);
+}
+
+function aiExtract(rawText){
+  const t = rawText.toLowerCase();
+  const materials = [["нерж","нержавеющая сталь"],["оцинк","оцинкованный"],["пвх","ПВХ"],["алюмин","алюминий"],["медн","медь"]];
+  let material = null;
+  for (const [kw, norm] of materials){ if(t.includes(kw)){ material = norm; break; } }
+
+  const types = ["труба","кабель","провод","профиль","лист","арматура","уголок","швеллер",
+    "саморез","болт","дюбель","гайка","перфоратор","болгарк","шурупов","шурik","шурик","уровень"];
+  let productType = null;
+  for (const kw of types){ if(t.includes(kw)){ productType = kw; break; } }
+
+  let dims = null;
+  const dimMatch = t.match(/\d+[.,]?\d*\s*(?:х|x|на)\s*\d+[.,]?\d*/);
+  if (dimMatch) dims = dimMatch[0].replace(/\s+/g,'').replace(',', '.');
+  if (!dims && t.includes('полтора')){
+    const nums = t.match(/\d+/);
+    if (nums) dims = nums[0] + 'x1.5';
+  }
+
+  let quantity = null, unit = null;
+  const qtyMatch = t.match(/(\d+)\s*(шт|метр|м\b|кг|т\b|мм)/);
+  if (qtyMatch){ quantity = parseInt(qtyMatch[1]); unit = qtyMatch[2] === 'метр' ? 'м' : qtyMatch[2]; }
+
+  return { product_type: productType, material, dimensions: dims, quantity, unit, raw_normalized: rawText };
+}
+
+function extractCatalogAttrs(name){
+  const lower = name.toLowerCase().replace(/х/g,'x');
+  const dimMatch = lower.match(/\d+[.,]?\d*x\d+[.,]?\d*/);
+  let material = null;
+  if (lower.includes('нержавеющ')) material = 'нержавеющая сталь';
+  else if (lower.includes('оцинков')) material = 'оцинкованный';
+  else if (lower.includes('пвх')) material = 'ПВХ';
+  else if (lower.includes('алюмин')) material = 'алюминий';
+  return { dimensions: dimMatch ? dimMatch[0] : null, material };
+}
+const CATALOG_ATTRS = PRODUCTS.map(p => extractCatalogAttrs(p.name));
+
+function similarity(a, b){
+  if (!a.length || !b.length) return 0;
+  const bigrams = s => { const r=new Set(); for(let i=0;i<s.length-1;i++) r.add(s.slice(i,i+2)); return r; };
+  const A = bigrams(a), B = bigrams(b);
+  let common = 0;
+  A.forEach(g => { if (B.has(g)) common++; });
+  return (2*common) / (A.size + B.size || 1);
+}
+
+function matchQuery(rawText){
+  const ai = aiExtract(rawText);
+  const qTokens = normalize(ai.raw_normalized);
+  const qStr = qTokens.join(' ');
+  let bestIdx = 0, bestScore = -1;
+  PRODUCTS.forEach((p, idx) => {
+    const pTokens = normalize(p.name);
+    const overlap = qTokens.filter(t => pTokens.includes(t)).length;
+    const ratio = similarity(qStr, pTokens.join(' '));
+    let bonus = 0;
+    if (ai.dimensions && CATALOG_ATTRS[idx].dimensions === ai.dimensions) bonus += 0.5;
+    if (ai.material && CATALOG_ATTRS[idx].material === ai.material) bonus += 0.3;
+    const score = ratio*0.5 + overlap*0.1 + bonus;
+    if (score > bestScore){ bestScore = score; bestIdx = idx; }
+  });
+  return { idx: bestIdx, score: Math.round(bestScore*1000)/1000, ai };
+}
+
+function top3Suppliers(idx){
+  const rows = SKU.filter(r => r.productIdx === idx).sort((a,b)=>a.price-b.price);
+  const prices = rows.map(r=>r.price);
+  const minP = Math.min(...prices), avgP = prices.reduce((a,b)=>a+b,0)/prices.length;
+  const cheapest = rows[0];
+  const optimal = rows.reduce((best,r) => {
+    const score = (r.price/avgP)*0.5 + (r.delivery/14)*0.25 - (r.rating/5)*0.25;
+    const bestScore = (best.price/avgP)*0.5 + (best.delivery/14)*0.25 - (best.rating/5)*0.25;
+    return score < bestScore ? r : best;
+  }, rows[0]);
+  const rest = rows.filter(r => r !== cheapest && r !== optimal);
+  const fastest = rest.length ? rest.reduce((a,b)=>a.delivery<b.delivery?a:b) : rows[rows.length-1];
+
+  return [["Самый дешёвый", cheapest], ["Оптимальный", optimal], ["Самый быстрый", fastest]]
+    .map(([label,r]) => ({
+      label, supplier:r.supplier, price:r.price, delivery:r.delivery, rating:r.rating,
+      delta: Math.round((r.price-minP)/minP*1000)/10
+    }));
+}
+
+const input = document.getElementById('orderInput');
+const submitBtn = document.getElementById('submitBtn');
+const resultPanel = document.getElementById('resultPanel');
+const emptyPanel = document.getElementById('emptyPanel');
+const attrsBox = document.getElementById('attrsBox');
+const matchLine = document.getElementById('matchLine');
+const resultBody = document.getElementById('resultBody');
+
+document.querySelectorAll('.ex-btn').forEach(btn => {
+  btn.addEventListener('click', () => { input.value = btn.dataset.q; process(); });
+});
+submitBtn.addEventListener('click', process);
+input.addEventListener('keydown', e => { if (e.key === 'Enter' && e.ctrlKey) process(); });
+
+function process(){
+  const text = input.value.trim();
+  if (!text) return;
+  const { idx, score, ai } = matchQuery(text);
+  const product = PRODUCTS[idx];
+
+  attrsBox.innerHTML = ['product_type','material','dimensions','quantity','unit'].map(key => `
+    <div class="attr-chip"><b>${key}</b>${ai[key] ?? '—'}</div>
+  `).join('');
+
+  matchLine.innerHTML = `Найден товар: <b>${product.name}</b> (${product.unit}) &nbsp;<span class="confidence">уверенность матчинга: ${score}</span>`;
+
+  const rows = top3Suppliers(idx);
+  resultBody.innerHTML = rows.map(r => `
+    <tr class="${r.delta === 0 ? 'best' : ''}">
+      <td>${r.label}</td>
+      <td>${r.supplier}</td>
+      <td>${r.price.toLocaleString('ru-RU')} ₽</td>
+      <td>${r.delivery}</td>
+      <td>${r.rating}</td>
+      <td class="${r.delta===0?'delta-zero':'delta-pos'}">${r.delta === 0 ? 'min' : '+'+r.delta+'%'}</td>
+    </tr>
+  `).join('');
+
+  resultPanel.classList.add('show');
+  emptyPanel.style.display = 'none';
+}
+</script>
+</body>
+</html>
